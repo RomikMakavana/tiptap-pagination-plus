@@ -1,4 +1,5 @@
 import { Extension } from "@tiptap/core";
+import { DOMSerializer } from "@tiptap/pm/model";
 import { EditorState, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, EditorView } from "@tiptap/pm/view";
 
@@ -14,6 +15,7 @@ interface PaginationPlusOptions {
   headerLeft: string;
 }
 const page_count_meta_key = "PAGE_COUNT_META_KEY";
+const header_footer_update_meta_key = "HEADER_FOOTER_UPDATE_META_KEY";
 export const PaginationPlus = Extension.create<PaginationPlusOptions>({
   name: "PaginationPlus",
   addOptions() {
@@ -83,35 +85,33 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions>({
         overflow-y: auto;
         width: 100%;
       }
+      .rm-with-pagination .rm-page-header,
+      .rm-with-pagination .rm-page-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+        height: 100%;
+        padding: 0 1in;
+      }
+
       .rm-with-pagination .rm-page-footer-left,
       .rm-with-pagination .rm-page-footer-right,
       .rm-with-pagination .rm-page-header-left,
       .rm-with-pagination .rm-page-header-right {
-        display: inline-block;
-      }
-      .rm-with-pagination .rm-page-header-left,
-      .rm-with-pagination .rm-page-header-right{
-        padding-top: 15px !important;
-      }
-
-      .rm-with-pagination .rm-page-header-left,
-      .rm-with-pagination .rm-page-footer-left{
-        float: left;
-        margin-left: 25px;
-      }
-      .rm-with-pagination .rm-page-header-right,
-      .rm-with-pagination .rm-page-footer-right{
-        float: right;
-        margin-right: 25px;
+        display: flex;
+        align-items: center;
+        height: 100%;
       }
       .rm-with-pagination .rm-page-number::before {
         content: counter(page-number);
       }
       .rm-with-pagination .rm-first-page-header{
-        display: inline-flex;
+        display: flex;
         justify-content: space-between;
+        align-items: center;
         width: 100%;
-        padding-top: 15px !important;
+        height: 100%;
       }
     `;
     document.head.appendChild(style);
@@ -173,7 +173,21 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions>({
           apply(tr, oldDeco, oldState, newState) {
             const pageCount = calculatePageCount(editor.view, pageOptions);
             const currentPageCount = getExistingPageCount(editor.view);
-            if ((pageCount > 1 ? pageCount : 1) !== currentPageCount) {
+            
+            // Check if header or footer content has changed
+            const oldHeader = oldState.doc.firstChild?.type.name === 'header' ? oldState.doc.firstChild : null;
+            const newHeader = newState.doc.firstChild?.type.name === 'header' ? newState.doc.firstChild : null;
+            const oldFooter = oldState.doc.lastChild?.type.name === 'footer' ? oldState.doc.lastChild : null;
+            const newFooter = newState.doc.lastChild?.type.name === 'footer' ? newState.doc.lastChild : null;
+            
+            const headerChanged = (oldHeader?.textContent || '') !== (newHeader?.textContent || '');
+            const footerChanged = (oldFooter?.textContent || '') !== (newFooter?.textContent || '');
+            
+            // Check if forced update via meta key
+            const forceUpdate = tr.getMeta(header_footer_update_meta_key);
+            
+            // Rebuild decorations if page count changed OR header/footer content changed OR forced update
+            if ((pageCount > 1 ? pageCount : 1) !== currentPageCount || headerChanged || footerChanged || forceUpdate) {
               const widgetList = createDecoration(newState, pageOptions);
               return DecorationSet.create(newState.doc, [...widgetList]);
             }
@@ -190,6 +204,21 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions>({
     ];
   },
 });
+
+// Helper functions to get content boundaries excluding header/footer nodes
+const getContentChildren = (editorDom: Element): Element[] => {
+  const children = Array.from(editorDom.children);
+  return children.filter(child =>
+    child.getAttribute('data-type') !== 'header' &&
+    child.getAttribute('data-type') !== 'footer' &&
+    !child.hasAttribute('data-rm-pagination')
+  );
+};
+
+const getLastContentElement = (editorDom: Element): Element | null => {
+  const contentChildren = getContentChildren(editorDom);
+  return contentChildren.length > 0 ? contentChildren[contentChildren.length - 1] : null;
+};
 
 const getExistingPageCount = (view: EditorView) => {
   const editorDom = view.dom;
@@ -209,7 +238,8 @@ const calculatePageCount = (
   const paginationElement = editorDom.querySelector("[data-rm-pagination]");
   const currentPageCount = getExistingPageCount(view);
   if (paginationElement) {
-    const lastElementOfEditor = editorDom.lastElementChild;
+    // Use helper function to get the last content element, excluding header/footer
+    const lastElementOfEditor = getLastContentElement(editorDom);
     const lastPageBreak =
       paginationElement.lastElementChild?.querySelector(".breaker");
     if (lastElementOfEditor && lastPageBreak) {
@@ -260,6 +290,8 @@ function createDecoration(
       const el = document.createElement("div");
       el.dataset.rmPagination = "true";
 
+      const serializer = DOMSerializer.fromSchema(state.schema);
+
       const pageBreakDefinition = ({
         firstPage = false,
         lastPage = false,
@@ -295,22 +327,25 @@ function createDecoration(
         pageFooter.classList.add("rm-page-footer");
         pageFooter.style.height = _pageHeaderHeight + "px";
 
-        const footerRight = pageOptions.footerRight.replace(
-          "{page}",
-          `<span class="rm-page-number"></span>`
-        );
-        const footerLeft = pageOptions.footerLeft.replace(
-          "{page}",
-          `<span class="rm-page-number"></span>`
-        );
+        const footerNode = state.doc.lastChild?.type.name === 'footer'
+  ? state.doc.lastChild
+  : null;
+
+  const footerFragment = footerNode
+  ? serializer.serializeFragment(footerNode.content)
+  : null;
 
         const pageFooterLeft = document.createElement("div");
         pageFooterLeft.classList.add("rm-page-footer-left");
-        pageFooterLeft.innerHTML = footerLeft;
+        if (footerFragment) {
+          pageFooterLeft.appendChild(footerFragment.cloneNode(true));
+        } else {
+          pageFooterLeft.innerHTML = pageOptions.footerLeft.replace("{page}", `<span class="rm-page-number"></span>`);
+        }
 
         const pageFooterRight = document.createElement("div");
         pageFooterRight.classList.add("rm-page-footer-right");
-        pageFooterRight.innerHTML = footerRight;
+        pageFooterRight.innerHTML = pageOptions.footerRight.replace("{page}", `<span class="rm-page-number"></span>`);
 
         pageFooter.append(pageFooterLeft);
         pageFooter.append(pageFooterRight);
@@ -332,9 +367,23 @@ function createDecoration(
         pageHeader.classList.add("rm-page-header");
         pageHeader.style.height = _pageHeaderHeight + "px";
 
+        const headerNode = state.doc.firstChild?.type.name === 'header'
+  ? state.doc.firstChild
+  : null;
+
+
+
+const headerFragment = headerNode
+  ? serializer.serializeFragment(headerNode.content)
+  : null;
+
         const pageHeaderLeft = document.createElement("div");
         pageHeaderLeft.classList.add("rm-page-header-left");
-        pageHeaderLeft.innerHTML = pageOptions.headerLeft;
+        if (headerFragment) {
+          pageHeaderLeft.appendChild(headerFragment.cloneNode(true));
+        } else {
+          pageHeaderLeft.innerHTML = pageOptions.headerLeft;
+        }
 
         const pageHeaderRight = document.createElement("div");
         pageHeaderRight.classList.add("rm-page-header-right");
@@ -377,9 +426,20 @@ function createDecoration(
       el.style.position = "relative";
       el.classList.add("rm-first-page-header");
 
+      // Use dynamic header content for first page as well
+      const headerNode = state.doc.firstChild?.type.name === 'header'
+        ? state.doc.firstChild
+        : null;
+      
       const pageHeaderLeft = document.createElement("div");
       pageHeaderLeft.classList.add("rm-first-page-header-left");
-      pageHeaderLeft.innerHTML = pageOptions.headerLeft;
+      if (headerNode) {
+        const serializer = DOMSerializer.fromSchema(state.schema);
+        const headerFragment = serializer.serializeFragment(headerNode.content);
+        pageHeaderLeft.appendChild(headerFragment.cloneNode(true));
+      } else {
+        pageHeaderLeft.innerHTML = pageOptions.headerLeft;
+      }
       el.append(pageHeaderLeft);
 
       const pageHeaderRight = document.createElement("div");
