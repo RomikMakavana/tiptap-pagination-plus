@@ -109,8 +109,8 @@ Key points for table pagination:
 
 - Automatic page breaks based on content height
 - Page numbers in the footer
-- Custom header/footer text support via document nodes or config
-- Use `{page}` variable to display current page number in header/footer text
+- Custom header/footer text support via document nodes or config with inline editing support
+- Use `{page}` variable to display current page number in header/footer text (Recommendation : Create UI for setting page number using the setHeaderContent/setFooterContent commands)
 - Table pagination with header preservation
 - Responsive design
 - Automatic page height calculation
