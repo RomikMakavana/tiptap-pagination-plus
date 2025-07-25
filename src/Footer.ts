@@ -29,7 +29,7 @@ export const FooterNode = Node.create({
       return {
         setFooterContent:
           (content: string) =>
-          ({ tr, state, dispatch }) => {
+          ({ tr, state, dispatch } : CommandProps) => {
             if (!dispatch) return false;
             
             const { schema } = state;

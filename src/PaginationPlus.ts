@@ -1,4 +1,4 @@
-import { Extension } from "@tiptap/core";
+import { Editor, Extension } from "@tiptap/core";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { EditorState, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, EditorView } from "@tiptap/pm/view";
@@ -13,6 +13,7 @@ interface PaginationPlusOptions {
   footerLeft: string;
   headerRight: string;
   headerLeft: string;
+  pagePlaceholder: string;
 }
 const page_count_meta_key = "PAGE_COUNT_META_KEY";
 const header_footer_update_meta_key = "HEADER_FOOTER_UPDATE_META_KEY";
@@ -25,10 +26,11 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions>({
       pageGapBorderSize: 1,
       pageBreakBackground: "#ffffff",
       pageHeaderHeight: 10,
-      footerRight: "{page}",
+      footerRight: "",
       footerLeft: "",
       headerRight: "",
       headerLeft: "",
+      pagePlaceholder: "{page}",
     };
   },
   onCreate() {
@@ -45,7 +47,8 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions>({
       .rm-with-pagination {
         counter-reset: page-number;
       }
-      .rm-with-pagination .rm-page-footer {
+      .rm-with-pagination .rm-first-page-header,
+      .rm-with-pagination .rm-page-header {
         counter-increment: page-number;
       }
       .rm-with-pagination .rm-page-break:last-child .rm-pagination-gap {
@@ -92,6 +95,7 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions>({
         align-items: center;
         width: 100%;
         height: 100%;
+        box-sizing: border-box;
         padding: 0 1in;
       }
 
@@ -113,6 +117,17 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions>({
         width: 100%;
         height: 100%;
       }
+
+       .rm-page-header:has(input),
+  .rm-first-page-header:has(input) {
+    border-bottom: 2px solid
+  }
+
+  /* Add a line at the top of the footer when it's being edited */
+  .rm-page-footer:has(input) {
+    border-top: 2px solid
+  }
+
     `;
     document.head.appendChild(style);
 
@@ -167,28 +182,19 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions>({
 
         state: {
           init(_, state) {
-            const widgetList = createDecoration(state, pageOptions);
+            const widgetList = createDecoration(state, pageOptions, editor);
             return DecorationSet.create(state.doc, widgetList);
           },
           apply(tr, oldDeco, oldState, newState) {
             const pageCount = calculatePageCount(editor.view, pageOptions);
             const currentPageCount = getExistingPageCount(editor.view);
             
-            // Check if header or footer content has changed
-            const oldHeader = oldState.doc.firstChild?.type.name === 'header' ? oldState.doc.firstChild : null;
-            const newHeader = newState.doc.firstChild?.type.name === 'header' ? newState.doc.firstChild : null;
-            const oldFooter = oldState.doc.lastChild?.type.name === 'footer' ? oldState.doc.lastChild : null;
-            const newFooter = newState.doc.lastChild?.type.name === 'footer' ? newState.doc.lastChild : null;
-            
-            const headerChanged = (oldHeader?.textContent || '') !== (newHeader?.textContent || '');
-            const footerChanged = (oldFooter?.textContent || '') !== (newFooter?.textContent || '');
-            
             // Check if forced update via meta key
-            const forceUpdate = tr.getMeta(header_footer_update_meta_key);
+            const headerUpdate = tr.getMeta(header_footer_update_meta_key);
             
             // Rebuild decorations if page count changed OR header/footer content changed OR forced update
-            if ((pageCount > 1 ? pageCount : 1) !== currentPageCount || headerChanged || footerChanged || forceUpdate) {
-              const widgetList = createDecoration(newState, pageOptions);
+            if ((pageCount > 1 ? pageCount : 1) !== currentPageCount || headerUpdate) {
+              const widgetList = createDecoration(newState, pageOptions, editor);
               return DecorationSet.create(newState.doc, [...widgetList]);
             }
             return oldDeco;
@@ -275,8 +281,70 @@ const calculatePageCount = (
 function createDecoration(
   state: EditorState,
   pageOptions: PaginationPlusOptions,
-  isInitial: boolean = false
+  editor: Editor
 ): Decoration[] {
+
+
+  // Helper function to make an element editable on double-click
+  const makeEditable = (
+    triggerElement: HTMLElement,
+    targetElement: HTMLElement,
+    type: 'header' | 'footer',
+    getContent: () => string,
+    onSave: (newContent: string) => void
+  ) => {
+    triggerElement.addEventListener("dblclick", () => {
+      // Prevent editing if an input is already present
+      if (targetElement.querySelector("input")) {
+        return;
+      }
+
+      const originalText = getContent();
+      const originalHtml = targetElement.innerHTML;
+      console.log(originalHtml);
+      console.log(originalText);
+      targetElement.innerHTML = ""; // Clear current content
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = originalText;
+      input.style.textAlign = type === 'header' ? 'right' : 'left';
+      input.style.width = "100%";
+      input.style.boxSizing = "border-box";
+      input.style.border = "none";
+      input.style.outline = "none";
+
+      // Stop Tiptap from interfering with typing
+      const swallow = (e: Event) => e.stopPropagation();
+      ['keydown', 'keypress', 'keyup'].forEach(ev =>
+        input.addEventListener(ev, swallow, true)
+      );
+
+      const saveChanges = () => {
+        if (input.value !== originalText) {
+          onSave(input.value);
+        } else {
+          targetElement.innerHTML = originalHtml;
+        }
+      };
+
+      input.addEventListener("blur", saveChanges);
+      input.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          saveChanges();
+        } else if (e.key === "Escape") {
+          targetElement.innerHTML = originalHtml;
+        }
+      });
+
+      targetElement.appendChild(input);
+      input.focus();
+      input.select();
+    });
+  };
+
+
   const pageWidget = Decoration.widget(
     0,
     (view) => {
@@ -292,13 +360,7 @@ function createDecoration(
 
       const serializer = DOMSerializer.fromSchema(state.schema);
 
-      const pageBreakDefinition = ({
-        firstPage = false,
-        lastPage = false,
-      }: {
-        firstPage: boolean;
-        lastPage: boolean;
-      }) => {
+      const pageBreakDefinition = () => {
         const pageContainer = document.createElement("div");
         pageContainer.classList.add("rm-page-break");
 
@@ -307,9 +369,7 @@ function createDecoration(
         page.style.position = "relative";
         page.style.float = "left";
         page.style.clear = "both";
-        page.style.marginTop = firstPage
-          ? `calc(${_pageHeaderHeight}px + ${_pageHeight}px)`
-          : _pageHeight + "px";
+        page.style.marginTop = _pageHeight + "px";
 
         const pageBreak = document.createElement("div");
         pageBreak.classList.add("breaker");
@@ -327,29 +387,39 @@ function createDecoration(
         pageFooter.classList.add("rm-page-footer");
         pageFooter.style.height = _pageHeaderHeight + "px";
 
+        // Find the footer node for this page
         const footerNode = state.doc.lastChild?.type.name === 'footer'
-  ? state.doc.lastChild
-  : null;
-
-  const footerFragment = footerNode
-  ? serializer.serializeFragment(footerNode.content)
-  : null;
+        ? state.doc.lastChild
+        : null;
+        
+        const footerFragment = footerNode
+          ? serializer.serializeFragment(footerNode.content)
+          : null;
 
         const pageFooterLeft = document.createElement("div");
         pageFooterLeft.classList.add("rm-page-footer-left");
         if (footerFragment) {
           pageFooterLeft.appendChild(footerFragment.cloneNode(true));
         } else {
-          pageFooterLeft.innerHTML = pageOptions.footerLeft.replace("{page}", `<span class="rm-page-number"></span>`);
+          pageFooterLeft.innerHTML = pageOptions.footerLeft;
         }
+
+        makeEditable(
+          pageFooter,
+          pageFooterLeft,
+          'footer',
+          () => footerNode?.textContent || pageOptions.footerLeft, // Get content from the node
+          (newContent) => {
+            editor.chain().focus().setFooterContent(newContent).run();
+          }
+        );
 
         const pageFooterRight = document.createElement("div");
         pageFooterRight.classList.add("rm-page-footer-right");
-        pageFooterRight.innerHTML = pageOptions.footerRight.replace("{page}", `<span class="rm-page-number"></span>`);
+        pageFooterRight.innerHTML = pageOptions.footerRight;
 
         pageFooter.append(pageFooterLeft);
         pageFooter.append(pageFooterRight);
-
 
         const pageSpace = document.createElement("div");
         pageSpace.classList.add("rm-pagination-gap");
@@ -368,26 +438,38 @@ function createDecoration(
         pageHeader.style.height = _pageHeaderHeight + "px";
 
         const headerNode = state.doc.firstChild?.type.name === 'header'
-  ? state.doc.firstChild
-  : null;
+          ? state.doc.firstChild
+          : null;
 
-
-
-const headerFragment = headerNode
-  ? serializer.serializeFragment(headerNode.content)
-  : null;
+        const headerFragment = headerNode
+          ? serializer.serializeFragment(headerNode.content)
+          : null;
 
         const pageHeaderLeft = document.createElement("div");
         pageHeaderLeft.classList.add("rm-page-header-left");
-        if (headerFragment) {
-          pageHeaderLeft.appendChild(headerFragment.cloneNode(true));
-        } else {
-          pageHeaderLeft.innerHTML = pageOptions.headerLeft;
-        }
+        pageHeaderLeft.innerHTML = pageOptions.headerLeft;
 
         const pageHeaderRight = document.createElement("div");
         pageHeaderRight.classList.add("rm-page-header-right");
-        pageHeaderRight.innerHTML = pageOptions.headerRight;
+        if (headerFragment) {
+          // Get the text content and replace PAGE_PLACEHOLDER with span
+          const tempDiv = document.createElement("div");
+          tempDiv.appendChild(headerFragment.cloneNode(true));
+          const textContent = tempDiv.innerHTML;
+          pageHeaderRight.innerHTML = textContent.replace(pageOptions.pagePlaceholder,   `<span class="rm-page-number"></span>`);
+        } else {
+          pageHeaderRight.innerHTML = pageOptions.headerRight.replace(pageOptions.pagePlaceholder, `<span class="rm-page-number"></span>`);
+        }
+
+        makeEditable(
+          pageHeader,
+          pageHeaderRight,
+          'header',
+          () => headerNode?.textContent || pageOptions.headerRight, // Get content from the node
+          (newContent) => {
+            editor.chain().focus().setHeaderContent(newContent).run();
+          }
+        );
 
         pageHeader.append(pageHeaderLeft, pageHeaderRight);
         pageBreak.append(pageFooter, pageSpace, pageHeader);
@@ -396,21 +478,11 @@ const headerFragment = headerNode
         return pageContainer;
       };
 
-      const page = pageBreakDefinition({ firstPage: false, lastPage: false });
-      const firstPage = pageBreakDefinition({
-        firstPage: true,
-        lastPage: false,
-      });
+      const pageCount = calculatePageCount(view, pageOptions);
       const fragment = document.createDocumentFragment();
 
-      const pageCount = calculatePageCount(view, pageOptions);
-
       for (let i = 0; i < pageCount; i++) {
-        if (i === 0) {
-          fragment.appendChild(firstPage.cloneNode(true));
-        } else {
-          fragment.appendChild(page.cloneNode(true));
-        }
+        fragment.appendChild(pageBreakDefinition());
       }
       el.append(fragment);
       el.id = "pages";
@@ -433,19 +505,32 @@ const headerFragment = headerNode
       
       const pageHeaderLeft = document.createElement("div");
       pageHeaderLeft.classList.add("rm-first-page-header-left");
-      if (headerNode) {
-        const serializer = DOMSerializer.fromSchema(state.schema);
-        const headerFragment = serializer.serializeFragment(headerNode.content);
-        pageHeaderLeft.appendChild(headerFragment.cloneNode(true));
-      } else {
-        pageHeaderLeft.innerHTML = pageOptions.headerLeft;
-      }
+      pageHeaderLeft.innerHTML = pageOptions.headerLeft;
       el.append(pageHeaderLeft);
 
       const pageHeaderRight = document.createElement("div");
       pageHeaderRight.classList.add("rm-first-page-header-right");
-      pageHeaderRight.innerHTML = pageOptions.headerRight;
+      if (headerNode) {
+        const serializer = DOMSerializer.fromSchema(state.schema);
+        const headerFragment = serializer.serializeFragment(headerNode.content);
+        const tempDiv = document.createElement("div");
+        tempDiv.appendChild(headerFragment.cloneNode(true));
+        const textContent = tempDiv.innerHTML;
+        pageHeaderRight.innerHTML = textContent.replace(pageOptions.pagePlaceholder, `<span class="rm-page-number"></span>`);
+      } else {
+        pageHeaderRight.innerHTML = pageOptions.headerRight.replace(pageOptions.pagePlaceholder, `<span class="rm-page-number"></span>`);
+      }
       el.append(pageHeaderRight);
+
+      makeEditable(
+        el,
+        pageHeaderRight,
+        'header',
+        () => headerNode?.textContent || pageOptions.headerRight, // Get content from the node
+        (newContent) => {
+          editor.chain().focus().setHeaderContent(newContent).run();
+        }
+      );
 
       el.style.height = `${pageOptions.pageHeaderHeight}px`;
       return el;
@@ -453,5 +538,5 @@ const headerFragment = headerNode
     { side: -1 }
   );
 
-  return !isInitial ? [pageWidget, firstHeaderWidget] : [pageWidget];
+  return [firstHeaderWidget, pageWidget]
 }
