@@ -41,7 +41,7 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions>({
 
     style.textContent = `
       .rm-with-pagination {
-        counter-reset: page-number;
+        counter-reset: page-number -1;
       }
       .rm-with-pagination .rm-page-footer {
         counter-increment: page-number;
