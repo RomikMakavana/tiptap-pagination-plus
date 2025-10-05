@@ -1,6 +1,6 @@
 {
   "name": "tiptap-pagination-plus",
-  "version": "1.1.8",
+  "version": "1.2.0",
   "description": "Tiptap pagination extension with advanced options like automatic page breaks, customizable layouts and more.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
