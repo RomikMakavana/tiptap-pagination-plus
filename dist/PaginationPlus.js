@@ -89,10 +89,7 @@ export const PaginationPlus = Extension.create({
         max-height: 300px;
         overflow-y: auto;
       }
-      .rm-with-pagination table tbody > tr{
-        display: table-row !important;
-      }
-      .rm-with-pagination *:has(br.ProseMirror-trailingBreak:only-child) {
+      .rm-with-pagination > *:has(> br.ProseMirror-trailingBreak:only-child) {
         display: table;
         width: 100%;
       }
