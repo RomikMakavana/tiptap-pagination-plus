@@ -5,8 +5,6 @@ export interface PaginationPlusOptions {
     pageWidth: number;
     pageGap: number;
     pageBreakBackground: string;
-    pageHeaderHeight: number;
-    pageFooterHeight: number;
     pageGapBorderSize: number;
     footerRight: string;
     footerLeft: string;
@@ -38,8 +36,6 @@ declare module "@tiptap/core" {
                 top: number;
                 bottom: number;
             }) => ReturnType;
-            updateHeaderHeight: (height: number) => ReturnType;
-            updateFooterHeight: (height: number) => ReturnType;
             updateHeaderContent: (left: string, right: string) => ReturnType;
             updateFooterContent: (left: string, right: string) => ReturnType;
         };
