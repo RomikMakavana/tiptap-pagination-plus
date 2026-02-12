@@ -69,7 +69,7 @@ function buildDecorations(doc: PMNode): DecorationSet {
         const el = document.createElement('span');
         el.classList.add('rm-br-decoration');
         return el;
-      });
+      }, { side: -1 });
       decorations.push(widget);
     }
   });
