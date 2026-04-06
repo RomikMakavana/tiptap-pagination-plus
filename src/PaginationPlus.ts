@@ -7,25 +7,27 @@ import { PageSize } from "./constants";
 import { HeaderOptions, FooterOptions, PageNumber, HeaderHeightMap, FooterHeightMap, HeaderClickEvent, FooterClickEvent } from "./types";
 import type { Node as PMNode } from 'prosemirror-model';
 
-
-export interface PaginationPlusOptions {
+export interface PaginationPlusConfig {
+  pageBreakBackground: string;
   pageHeight: number;
   pageWidth: number;
+  marginTop: number;
+  marginBottom: number;
+  marginLeft: number;
+  marginRight: number;
   pageGap: number;
-  pageBreakBackground: string;
-  pageGapBorderSize: number;
+  contentMarginTop: number;
+  contentMarginBottom: number;
   footerRight: string;
   footerLeft: string;
   headerRight: string;
   headerLeft: string;
   customHeader: Record<PageNumber, HeaderOptions>;
   customFooter: Record<PageNumber, FooterOptions>;
-  marginTop: number;
-  marginBottom: number;
-  marginLeft: number;
-  marginRight: number;
-  contentMarginTop: number;
-  contentMarginBottom: number;
+}
+
+export interface PaginationPlusOptions extends PaginationPlusConfig {
+  pageGapBorderSize: number;
   pageGapBorderColor: string;
   onHeaderClick?: HeaderClickEvent
   onFooterClick?: FooterClickEvent
@@ -34,7 +36,9 @@ export interface PaginationPlusOptions {
 export interface PaginationPlusStorage extends PaginationPlusOptions {
   headerHeight: HeaderHeightMap;
   footerHeight: FooterHeightMap;
+  appliedConfig: PaginationPlusConfig;
 }
+
 const page_count_meta_key = "PAGE_COUNT_META_KEY";
 const footer_height_meta_key = "FOOTER_HEIGHT_META_KEY";
 
@@ -76,26 +80,33 @@ function buildDecorations(doc: PMNode): DecorationSet {
   return DecorationSet.create(doc, decorations);
 
 }
-const defaultOptions: PaginationPlusOptions = {
+
+const defaultPageConfig: PaginationPlusConfig = {
+  pageBreakBackground: "#ffffff",
   pageHeight: 800,
   pageWidth: 789,
-  pageGap: 50,
-  pageGapBorderSize: 1,
-  pageBreakBackground: "#ffffff",
-  footerRight: "{page}",
-  footerLeft: "",
-  headerRight: "",
-  headerLeft: "",
   marginTop: 20,
   marginBottom: 20,
   marginLeft: 50,
   marginRight: 50,
+  pageGap: 50,
   contentMarginTop: 10,
   contentMarginBottom: 10,
-  pageGapBorderColor: "#e5e5e5",
+  footerRight: "{page}",
+  footerLeft: "",
+  headerRight: "",
+  headerLeft: "",
   customHeader: {},
   customFooter: {},
 }
+
+const defaultOptions: PaginationPlusOptions = {
+  pageGapBorderSize: 1,
+  pageGapBorderColor: "#e5e5e5",
+  ...defaultPageConfig,
+}
+
+
 
 const refreshPage = (targetNode: HTMLElement) => {
   const paginationElement = targetNode.querySelector(
@@ -113,6 +124,76 @@ const refreshPage = (targetNode: HTMLElement) => {
   }
 };
 
+const getAppliedPageConfig = (_storage: PaginationPlusStorage, _currentOptions: PaginationPlusOptions): PaginationPlusOptions => {
+  return {
+    ..._currentOptions,
+    pageBreakBackground: _storage.appliedConfig.pageBreakBackground ?? defaultOptions.pageBreakBackground,
+    pageHeight: _storage.appliedConfig.pageHeight ?? defaultOptions.pageHeight,
+    pageWidth: _storage.appliedConfig.pageWidth ?? defaultPageConfig.pageWidth,
+    marginTop: _storage.appliedConfig.marginTop ?? defaultPageConfig.marginTop,
+    marginBottom: _storage.appliedConfig.marginBottom ?? defaultPageConfig.marginBottom,
+    marginLeft: _storage.appliedConfig.marginLeft ?? defaultPageConfig.marginLeft,
+    marginRight: _storage.appliedConfig.marginRight ?? defaultPageConfig.marginRight,
+    pageGap: _storage.appliedConfig.pageGap ?? defaultPageConfig.pageGap,
+    contentMarginTop: _storage.appliedConfig.contentMarginTop ?? defaultPageConfig.contentMarginTop,
+    contentMarginBottom: _storage.appliedConfig.contentMarginBottom ?? defaultPageConfig.contentMarginBottom,
+    footerRight: _storage.appliedConfig.footerRight ?? defaultPageConfig.footerRight,
+    footerLeft: _storage.appliedConfig.footerLeft ?? defaultPageConfig.footerLeft,
+    headerRight: _storage.appliedConfig.headerRight ?? defaultPageConfig.headerRight,
+    headerLeft: _storage.appliedConfig.headerLeft ?? defaultPageConfig.headerLeft,
+    customHeader: _storage.appliedConfig.customHeader ?? defaultPageConfig.customHeader,
+    customFooter: _storage.appliedConfig.customFooter ?? defaultPageConfig.customFooter,
+  };
+}
+
+const getPageConfig = (_storage: PaginationPlusStorage, _currentOptions: PaginationPlusOptions): { config: PaginationPlusConfig, options: PaginationPlusOptions } => {
+  const pageConfig: PaginationPlusConfig = {
+    pageBreakBackground: _storage.pageBreakBackground ?? defaultOptions.pageBreakBackground,
+    pageHeight: _storage.pageHeight ?? defaultOptions.pageHeight,
+    pageWidth: _storage.pageWidth ?? defaultPageConfig.pageWidth,
+    marginTop: _storage.marginTop ?? defaultPageConfig.marginTop,
+    marginBottom: _storage.marginBottom ?? defaultPageConfig.marginBottom,
+    marginLeft: _storage.marginLeft ?? defaultPageConfig.marginLeft,
+    marginRight: _storage.marginRight ?? defaultPageConfig.marginRight,
+    pageGap: _storage.pageGap ?? defaultPageConfig.pageGap,
+    contentMarginTop: _storage.contentMarginTop ?? defaultPageConfig.contentMarginTop,
+    contentMarginBottom: _storage.contentMarginBottom ?? defaultPageConfig.contentMarginBottom,
+    footerRight: _storage.footerRight ?? defaultPageConfig.footerRight,
+    footerLeft: _storage.footerLeft ?? defaultPageConfig.footerLeft,
+    headerRight: _storage.headerRight ?? defaultPageConfig.headerRight,
+    headerLeft: _storage.headerLeft ?? defaultPageConfig.headerLeft,
+    customHeader: _storage.customHeader ?? defaultPageConfig.customHeader,
+    customFooter: _storage.customFooter ?? defaultPageConfig.customFooter,
+  };
+  return {
+    config: pageConfig,
+    options: {
+    ..._currentOptions,
+    ...pageConfig}
+  };
+}
+
+const getPageConfigFromOptions = (_currentOptions: PaginationPlusOptions): PaginationPlusConfig => {
+  return {
+    pageBreakBackground: _currentOptions.pageBreakBackground ?? defaultOptions.pageBreakBackground,
+    pageHeight: _currentOptions.pageHeight ?? defaultOptions.pageHeight,
+    pageWidth: _currentOptions.pageWidth ?? defaultPageConfig.pageWidth,
+    marginTop: _currentOptions.marginTop ?? defaultPageConfig.marginTop,
+    marginBottom: _currentOptions.marginBottom ?? defaultPageConfig.marginBottom,
+    marginLeft: _currentOptions.marginLeft ?? defaultPageConfig.marginLeft,
+    marginRight: _currentOptions.marginRight ?? defaultPageConfig.marginRight,
+    pageGap: _currentOptions.pageGap ?? defaultPageConfig.pageGap,
+    contentMarginTop: _currentOptions.contentMarginTop ?? defaultPageConfig.contentMarginTop,
+    contentMarginBottom: _currentOptions.contentMarginBottom ?? defaultPageConfig.contentMarginBottom,
+    footerRight: _currentOptions.footerRight ?? defaultPageConfig.footerRight,
+    footerLeft: _currentOptions.footerLeft ?? defaultPageConfig.footerLeft,
+    headerRight: _currentOptions.headerRight ?? defaultPageConfig.headerRight,
+    headerLeft: _currentOptions.headerLeft ?? defaultPageConfig.headerLeft,
+    customHeader: _currentOptions.customHeader ?? defaultPageConfig.customHeader,
+    customFooter: _currentOptions.customFooter ?? defaultPageConfig.customFooter,
+  };
+}
+
 const paginationKey = new PluginKey("pagination");
 
 export const PaginationPlus = Extension.create<PaginationPlusOptions, PaginationPlusStorage>({
@@ -125,9 +206,14 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
       ...defaultOptions,
       headerHeight: new Map(),
       footerHeight: new Map(),
+      appliedConfig: defaultPageConfig,
     };
   },
   onCreate() {
+
+    const { options: _currentOptions } = getPageConfig(this.storage, this.options);
+    const pageConfig = getPageConfigFromOptions(this.options);
+
     const targetNode = this.editor.view.dom;
     targetNode.classList.add("rm-with-pagination");
     targetNode.style.border = `1px solid var(--rm-page-gap-border-color)`;
@@ -135,7 +221,7 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
     targetNode.style.paddingRight = `var(--rm-margin-right)`;
     targetNode.style.width = `var(--rm-page-width)`;
 
-    updateCssVariables(targetNode, this.options);
+    updateCssVariables(targetNode, {..._currentOptions, ...pageConfig});
 
     const style = document.createElement("style");
     style.dataset.rmPaginationStyle = "";
@@ -259,55 +345,86 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
   },
   addProseMirrorPlugins() {
     const editor = this.editor;
+    const storage = this.storage;
     return [
       new Plugin({
         key: paginationKey,
 
         state: {
           init: (_, state) => {
-            const widgetList = createDecoration(this.options, new Map(), new Map());
-            this.storage = { ...this.options, headerHeight: new Map(), footerHeight: new Map() };
+            const _currentOptions =  getPageConfigFromOptions(this.options);
+
+            const pageConfig = getPageConfigFromOptions(this.options);
+            const widgetList = createDecoration({...this.options, ..._currentOptions}, new Map(), new Map());
+
+            storage.pageBreakBackground = _currentOptions.pageBreakBackground;
+            storage.pageHeight = _currentOptions.pageHeight;
+            storage.pageWidth = _currentOptions.pageWidth;
+            storage.marginTop = _currentOptions.marginTop;
+            storage.marginBottom = _currentOptions.marginBottom;
+            storage.marginLeft = _currentOptions.marginLeft;
+            storage.marginRight = _currentOptions.marginRight;
+            storage.pageGap = _currentOptions.pageGap;
+            storage.contentMarginTop = _currentOptions.contentMarginTop;
+            storage.contentMarginBottom = _currentOptions.contentMarginBottom;
+            storage.footerRight = _currentOptions.footerRight;
+            storage.footerLeft = _currentOptions.footerLeft;
+            storage.headerRight = _currentOptions.headerRight;
+            storage.headerLeft = _currentOptions.headerLeft;
+            storage.customHeader = _currentOptions.customHeader;
+            storage.customFooter = _currentOptions.customFooter;
+            storage.headerHeight = new Map();
+            storage.footerHeight = new Map();
+            storage.appliedConfig = pageConfig;
 
             return {
               decorations : DecorationSet.create(state.doc, widgetList),
             };
           },
           apply: (tr, oldDeco, oldState, newState) => {
-            const pageCount = calculatePageCount(editor.view, this.options);
-            const currentPageCount = getExistingPageCount(editor.view);
+            const { options: _currentOptions, config: pageConfig } =  getPageConfig(storage, this.options);
 
+            const pageCount = getNewPageCount(editor.view, {..._currentOptions, ...pageConfig});
+            const currentPageCount = getExistingPageCount(editor.view);
             const getNewDecoration = () => {
-              updateCssVariables(editor.view.dom, this.options);
+              const { options: _currentOptions, config: pageConfig } =  getPageConfig(storage, this.options);
+
+              updateCssVariables(editor.view.dom, _currentOptions);
+
               let headerHeight = "headerHeight" in this.storage ? this.storage.headerHeight : new Map();
               let footerHeight = "footerHeight" in this.storage ? this.storage.footerHeight : new Map();
 
-              const widgetList = createDecoration(this.options, headerHeight, footerHeight);
-              this.storage = { ...this.options, headerHeight, footerHeight };
+              const widgetList = createDecoration({..._currentOptions, ...pageConfig}, headerHeight, footerHeight);
+
+
+              storage.appliedConfig = pageConfig;
+              storage.headerHeight = headerHeight;
+              storage.footerHeight = footerHeight;
+
               return {
                 decorations : DecorationSet.create(newState.doc, [...widgetList]),
                 footerHeight
               };
             }
 
-
             if (
               (pageCount > 1 ? pageCount : 1) !== currentPageCount ||
-              this.storage.pageBreakBackground !== this.options.pageBreakBackground ||
-              this.storage.pageHeight !== this.options.pageHeight ||
-              this.storage.pageWidth !== this.options.pageWidth ||
-              this.storage.marginTop !== this.options.marginTop ||
-              this.storage.marginBottom !== this.options.marginBottom ||
-              this.storage.marginLeft !== this.options.marginLeft ||
-              this.storage.marginRight !== this.options.marginRight ||
-              this.storage.pageGap !== this.options.pageGap ||
-              this.storage.contentMarginTop !== this.options.contentMarginTop ||
-              this.storage.contentMarginBottom !== this.options.contentMarginBottom ||
-              this.storage.headerLeft !== this.options.headerLeft ||
-              this.storage.headerRight !== this.options.headerRight ||
-              this.storage.footerLeft !== this.options.footerLeft ||
-              this.storage.footerRight !== this.options.footerRight ||
-              !deepEqualIterative(this.options.customHeader, this.storage.customHeader) ||
-              !deepEqualIterative(this.options.customFooter, this.storage.customFooter)
+              storage.pageBreakBackground !== storage.appliedConfig.pageBreakBackground ||
+              storage.pageHeight !== storage.appliedConfig.pageHeight ||
+              storage.pageWidth !== storage.appliedConfig.pageWidth ||
+              storage.marginTop !== storage.appliedConfig.marginTop ||
+              storage.marginBottom !== storage.appliedConfig.marginBottom ||
+              storage.marginLeft !== storage.appliedConfig.marginLeft ||
+              storage.marginRight !== storage.appliedConfig.marginRight ||
+              storage.pageGap !== storage.appliedConfig.pageGap ||
+              storage.contentMarginTop !== storage.appliedConfig.contentMarginTop ||
+              storage.contentMarginBottom !== storage.appliedConfig.contentMarginBottom ||
+              storage.headerLeft !== storage.appliedConfig.headerLeft ||
+              storage.headerRight !== storage.appliedConfig.headerRight ||
+              storage.footerLeft !== storage.appliedConfig.footerLeft ||
+              storage.footerRight !== storage.appliedConfig.footerRight ||
+              !deepEqualIterative(storage.appliedConfig.customHeader, storage.customHeader) ||
+              !deepEqualIterative(storage.appliedConfig.customFooter, storage.customFooter)
             ) {
               return getNewDecoration();
             }
@@ -325,7 +442,9 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
         view: (editorView: EditorView) => {
           return {
             update: (view : EditorView) => {
-                const pageCount = calculatePageCount(view, this.options);
+              const { options: _currentOptions, config: pageConfig } =  getPageConfig(storage, this.options);
+
+                const pageCount = getNewPageCount(view, {..._currentOptions, ...pageConfig});
                 const currentPageCount = getExistingPageCount(view);
                 
                 const triggerUpdate = (_footerHeight?: FooterHeightMap) => {
@@ -340,8 +459,8 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
                   return;
                 }
 
-                const headerHeight = getHeaderHeight(view.dom, getCustomPages(this.options.customHeader, {}), "content");
-                const footerHeight = getFooterHeight(view.dom, getCustomPages({}, this.options.customFooter), "content");
+                const headerHeight = getHeaderHeight(view.dom, getCustomPages(_currentOptions.customHeader, {}), "content");
+                const footerHeight = getFooterHeight(view.dom, getCustomPages({}, _currentOptions.customFooter), "content");
 
                 const footerHeightForCurrentPages = new Map<PageNumber, number>();
                 for(let i = 0; i <= pageCount; i++) {
@@ -382,7 +501,7 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
                   
                   const headerHeight = headerHeightForCurrentPages.has(page) ? headerHeightForCurrentPages.get(page) || 0 : headerHeightForCurrentPages.get(0) || 0;
                   const footerHeight = footerHeightForCurrentPages.has(page) ? footerHeightForCurrentPages.get(page) || 0 : footerHeightForCurrentPages.get(0) || 0;
-                  const { _pageHeaderHeight, _pageHeight } = getHeight(this.options, headerHeight, footerHeight);
+                  const { _pageHeaderHeight, _pageHeight } = getHeight(_currentOptions, headerHeight, footerHeight);
                   
                   const contentHeight = page === 1 ? _pageHeight + _pageHeaderHeight : _pageHeight;
                   if(page === 1) {
@@ -447,57 +566,58 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
   addCommands() {
     return {
       updatePageBreakBackground: (color: string) => () => {
-        this.options.pageBreakBackground = color;
+        this.storage.pageBreakBackground = color;
         return true;
       },
       updatePageSize: (size: PageSize) => () => {
-        this.options.pageHeight = size.pageHeight;
-        this.options.pageWidth = size.pageWidth;
-        this.options.marginTop = size.marginTop;
-        this.options.marginBottom = size.marginBottom;
-        this.options.marginLeft = size.marginLeft;
-        this.options.marginRight = size.marginRight;
+        
+        this.storage.pageHeight = size.pageHeight;
+        this.storage.pageWidth = size.pageWidth;
+        this.storage.marginTop = size.marginTop;
+        this.storage.marginBottom = size.marginBottom;
+        this.storage.marginLeft = size.marginLeft;
+        this.storage.marginRight = size.marginRight;
         return true;
       },
       updatePageWidth: (width: number) => () => {
-        this.options.pageWidth = width;
+        this.storage.pageWidth = width;
         return true;
       },
       updatePageHeight: (height: number) => () => {
-        this.options.pageHeight = height;
+        this.storage.pageHeight = height;
         return true;
       },
       updatePageGap: (gap: number) => () => {
-        this.options.pageGap = gap;
+        this.storage.pageGap = gap;
         return true;
       },
       updateMargins: (margins: { top: number, bottom: number, left: number, right: number }) => () => {
-        this.options.marginTop = margins.top;
-        this.options.marginBottom = margins.bottom;
-        this.options.marginLeft = margins.left;
-        this.options.marginRight = margins.right;
+        this.storage.marginTop = margins.top;
+        this.storage.marginBottom = margins.bottom;
+        this.storage.marginLeft = margins.left;
+        this.storage.marginRight = margins.right;
         return true;
       },
       updateContentMargins: (margins: { top: number, bottom: number }) => () => {
-        this.options.contentMarginTop = margins.top;
-        this.options.contentMarginBottom = margins.bottom;
+        this.storage.contentMarginTop = margins.top;
+        this.storage.contentMarginBottom = margins.bottom;
         return true;
       },
       updateHeaderContent: (left: string, right: string, pageNumber?: PageNumber) => () => {
         if(pageNumber) {
-          this.options.customHeader = { ...this.options.customHeader, [pageNumber]: { headerLeft: left, headerRight: right } };
+          this.storage.customHeader = { ...this.storage.customHeader, [pageNumber]: { headerLeft: left, headerRight: right } };
         }else{
-          this.options.headerLeft = left;
-          this.options.headerRight = right;
+          this.storage.headerLeft = left;
+          this.storage.headerRight = right;
         }
         return true;
       },
       updateFooterContent: (left: string, right: string, pageNumber?: PageNumber) => () => {
         if(pageNumber) {
-          this.options.customFooter = { ...this.options.customFooter, [pageNumber]: { footerLeft: left, footerRight: right } };
+          this.storage.customFooter = { ...this.storage.customFooter, [pageNumber]: { footerLeft: left, footerRight: right } };
         }else{
-          this.options.footerLeft = left;
-          this.options.footerRight = right;
+          this.storage.footerLeft = left;
+          this.storage.footerRight = right;
         }
         return true;
       },
@@ -545,16 +665,12 @@ const calculatePageCount = (
         const addPage = Math.ceil(lastPageGap / pageContentAreaHeight);
         return currentPageCount + addPage;
       } else {
-        const lpFrom = -10;
-        const lpTo = -(pageOptions.pageHeight - 10);
-        if (lastPageGap > lpTo && lastPageGap < lpFrom) {
-          return currentPageCount;
-        } else if (lastPageGap < lpTo) {
-          const pageHeightOnRemove =
-            pageOptions.pageHeight + pageOptions.pageGap;
-          const removePage = Math.floor(lastPageGap / pageHeightOnRemove);
-          return currentPageCount + removePage;
-        } else {
+        const allBreaksAfterLastElement = Array.from(paginationElement.querySelectorAll(".breaker"));
+        const allBreaksAfterLastElementRect = allBreaksAfterLastElement.filter(element => element.getBoundingClientRect().top > lastElementRect.bottom);
+        const removePage = allBreaksAfterLastElementRect.length;
+        if(removePage > 1) {
+          return currentPageCount - removePage;
+        }else{
           return currentPageCount;
         }
       }
@@ -567,6 +683,11 @@ const calculatePageCount = (
     return pageCount;
   }
 };
+
+const getNewPageCount = (view: EditorView, pageOptions: PaginationPlusOptions) => {
+  const pageCount = calculatePageCount(view, pageOptions);
+  return pageCount <= 1 ? 1 : pageCount;
+}
 
 function createDecoration(
   pageOptions: PaginationPlusOptions,
@@ -645,7 +766,7 @@ function createDecoration(
 
       const fragment = document.createDocumentFragment();
 
-      const pageCount = calculatePageCount(view, pageOptions);
+      const pageCount = getNewPageCount(view, pageOptions);
 
       for (let i = 0; i < pageCount; i++) {
         const pageNumber = i+1;

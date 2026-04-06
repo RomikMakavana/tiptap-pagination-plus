@@ -1,6 +1,6 @@
 {
   "name": "tiptap-pagination-plus",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "Tiptap pagination extension with advanced options like automatic page breaks, customizable layouts and more.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -29,8 +29,8 @@
   "author": "Romik Makavana",
   "license": "MIT",
   "devDependencies": {
-    "@tiptap/core": "^2.26.1",
-    "@tiptap/pm": "^2.26.1",
+    "@tiptap/core": "^2.27.2",
+    "@tiptap/pm": "^2.27.2",
     "@types/node": "^22.15.2",
     "tsc-watch": "^6.0.4",
     "typescript": "^5.8.3"
