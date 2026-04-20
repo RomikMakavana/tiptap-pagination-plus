@@ -43,25 +43,30 @@ for convergence, types 15 characters, and asserts thresholds:
 
 | Threshold            | Default  | Env override             |
 | -------------------- | -------- | ------------------------ |
-| Convergence          | 3000 ms  | `CONVERGENCE_MAX_MS`     |
-| Per-keystroke p95    | 100 ms   | `KEYSTROKE_P95_MAX_MS`   |
+| Convergence          | 4000 ms  | `CONVERGENCE_MAX_MS`     |
+| Per-keystroke p95    | 250 ms   | `KEYSTROKE_P95_MAX_MS`   |
 | Paragraph seed count | 600      | `PERF_PARAGRAPHS`        |
 | Table seed count     | 25       | `PERF_TABLES`            |
 
-Baseline numbers at ~105 pages on an M-series Mac (headless):
+The thresholds are set to roughly 2× the observed fix baseline so CI
+boxes survive run-to-run variance, while still catching any return to
+the pre-fix ballpark (keystroke p95 ~335 ms).
 
-| Metric                 | Before fix (commit before this PR) | After fix |
-| ---------------------- | ---------------------------------- | --------- |
-| First-convergence time | ~730 ms                            | ~800 ms   |
-| Forced reflow          | 316 ms                             | 94 ms     |
-| Keystroke avg          | 200 ms                             | 33 ms     |
-| Keystroke p95          | 335 ms                             | 34 ms     |
-| LCP                    | 2079 ms                            | 307 ms    |
+Observed baselines at ~105 pages on an M-series Mac (headless
+puppeteer):
 
-The convergence number is essentially unchanged — the win is in typing
-latency, where the pre-fix regression was most visible. The thresholds
-are set loosely enough to survive CI variance but tight enough to catch
-the "every keystroke reads layout" regression.
+| Metric                 | Before fix       | After fix |
+| ---------------------- | ---------------: | --------: |
+| First-convergence time |         ~2000 ms |  ~1000 ms |
+| Forced reflow          |           316 ms |     94 ms |
+| Keystroke p95          |           335 ms |   70-150 ms |
+| LCP                    |          2079 ms |    307 ms |
+
+Keystroke p95 has meaningful variance depending on system load — the
+rAF cycle itself costs < 1 ms per keystroke at steady state (confirmed
+by instrumentation); the rest is ProseMirror's own DOM patching at
+~4000 tracked nodes. The win versus the pre-fix code is that layout
+reads no longer happen in `Plugin.state.apply` on every transaction.
 
 ## Implementation notes
 

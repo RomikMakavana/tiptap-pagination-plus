@@ -62,12 +62,21 @@ async function main() {
   const urlParams = new URLSearchParams(location.search);
   const paragraphCount = Number(urlParams.get("paragraphs") ?? 300);
   const tableCount = Number(urlParams.get("tables") ?? 15);
+  const file = urlParams.get("file");
 
   const statusEl = document.getElementById("status")!;
   const el = document.getElementById("editor")!;
 
-  statusEl.textContent = `Building content (paragraphs=${paragraphCount}, tables=${tableCount})…`;
-  const html = buildSeedHtml(paragraphCount, tableCount);
+  let html: string;
+  if (file) {
+    statusEl.textContent = `Fetching ${file}…`;
+    const res = await fetch(file);
+    if (!res.ok) throw new Error(`fetch ${file}: ${res.status}`);
+    html = await res.text();
+  } else {
+    statusEl.textContent = `Building content (paragraphs=${paragraphCount}, tables=${tableCount})…`;
+    html = buildSeedHtml(paragraphCount, tableCount);
+  }
   mark("html-built");
 
   statusEl.textContent = "Creating editor…";

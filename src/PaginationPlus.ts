@@ -580,6 +580,16 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
               getCustomPages({}, _currentOptions.customFooter),
               "content"
             );
+            // Persist measured heights so the next `createDecoration` call
+            // uses them for inline page marginTop. Without this the inline
+            // fallback is `pageHeight - margins` (ignoring header/footer
+            // content), which overshoots by the actual footer text height
+            // (e.g. ~19 px for a "{page}" footer). When `--rm-page-content-*`
+            // CSS vars are then applied below, each page shrinks and exposes
+            // a content overflow of ~N × 19 px — under-paginating the
+            // tail by one page at ~40-page documents.
+            storage.headerHeight = headerHeight;
+            storage.footerHeight = footerHeight;
 
             const footerHeightForCurrentPages = new Map<PageNumber, number>();
             for (let i = 0; i <= pageCount; i++) {
@@ -675,17 +685,48 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
               ? editorView.dom.scrollHeight
               : 0;
 
+          // The full convergence cycle is: iterate to a stable pageCount,
+          // then measure real header/footer heights and write CSS vars
+          // so each page's content area matches what was used during
+          // pagination. On first mount the storage measurements are
+          // empty, so runPost's CSS-var write shrinks each page by the
+          // real footer-content height (~19 px for "{page}"). That
+          // shrinkage can expose overflow (≈ footer-height × pageCount)
+          // which under-paginates the tail by one page on a ~40-page
+          // document — so we re-run iterate+post in that case.
+          //
+          // On steady-state keystrokes (typing a character that doesn't
+          // cross a page boundary) iterate breaks immediately without
+          // dispatching. We detect that via the before/after pageCount
+          // check and skip runPost entirely, keeping the hot path to
+          // rAF scheduling + one no-op iterate.
           const scheduleConvergenceCycle = () => {
             if (destroyed) return;
             if (rafHandle !== null) return;
             rafHandle = requestAnimationFrame(() => {
               rafHandle = null;
+              const countBefore =
+                paginationKey.getState(editorView.state)?.renderedPageCount ??
+                1;
               iterateUntilStable();
-              runPostConvergenceUpdate();
+              const countAfterIter =
+                paginationKey.getState(editorView.state)?.renderedPageCount ??
+                1;
+              if (countAfterIter !== countBefore) {
+                const hBefore = storage.headerHeight?.get?.(0);
+                const fBefore = storage.footerHeight?.get?.(0);
+                runPostConvergenceUpdate();
+                const hAfter = storage.headerHeight?.get?.(0);
+                const fAfter = storage.footerHeight?.get?.(0);
+                if (hBefore !== hAfter || fBefore !== fAfter) {
+                  iterateUntilStable();
+                  runPostConvergenceUpdate();
+                }
+              }
               converged = true;
-              // Resync AFTER iteration so later resize notifications are
-              // compared against the new steady state, not the pre-iteration
-              // baseline.
+              // Resync AFTER the cycle so later resize notifications are
+              // compared against the settled steady state, not the
+              // pre-iteration baseline.
               lastSeenHeight = editorView.dom.scrollHeight;
             });
           };
