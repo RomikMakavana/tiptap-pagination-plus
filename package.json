@@ -12,6 +12,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
+    "prepare": "tsc",
     "watch": "tsc-watch --onSuccess \"echo 'Build completed'\""
   },
   "keywords": [
