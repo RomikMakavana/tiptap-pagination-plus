@@ -193,7 +193,17 @@ const getPageConfigFromOptions = (_currentOptions: PaginationPlusOptions): Pagin
   };
 }
 
-const paginationKey = new PluginKey("pagination");
+type PaginationState = {
+  decorations: DecorationSet;
+  // The page count that the currently-mounted widget was built with.
+  // Kept in plugin state so `apply` doesn't have to read DOM layout to
+  // decide whether a rebuild is needed. Layout is measured only in
+  // `view.update` / `iterateUntilStable`, which then dispatch a meta
+  // transaction carrying the new target.
+  renderedPageCount: number;
+};
+
+const paginationKey = new PluginKey<PaginationState>("pagination");
 
 // Shared by Plugin.state.apply and view.update to decide whether the
 // currently-applied page config differs from the desired one.
@@ -378,7 +388,9 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
             const _currentOptions =  getPageConfigFromOptions(this.options);
 
             const pageConfig = getPageConfigFromOptions(this.options);
-            const widgetList = createDecoration({...this.options, ..._currentOptions}, new Map(), new Map());
+            // Start with a single page; the real count is computed after
+            // mount by `iterateUntilStable` once layout is available.
+            const widgetList = createDecoration({...this.options, ..._currentOptions}, new Map(), new Map(), 1);
 
             storage.pageBreakBackground = _currentOptions.pageBreakBackground;
             storage.pageHeight = _currentOptions.pageHeight;
@@ -401,50 +413,70 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
             storage.appliedConfig = pageConfig;
 
             return {
-              decorations : DecorationSet.create(state.doc, widgetList),
+              decorations: DecorationSet.create(state.doc, widgetList),
+              renderedPageCount: 1,
             };
           },
-          apply: (tr, oldDeco, oldState, newState) => {
-            const { options: _currentOptions, config: pageConfig } =  getPageConfig(storage, this.options);
+          apply: (tr, oldPluginState, _oldState, newState) => {
+            // Fast path — the common case for every keystroke. We must not
+            // read DOM layout here: `apply` runs on every transaction and
+            // reading geometry would force a reflow per keystroke.
+            const meta = tr.getMeta(page_count_meta_key) as
+              | { pageCount?: number }
+              | undefined;
+            const configDirty = isConfigDirty(storage);
 
-            const pageCount = getNewPageCount(editor.view, {..._currentOptions, ...pageConfig});
-            const currentPageCount = getExistingPageCount(editor.view);
-            const getNewDecoration = () => {
-              const { options: _currentOptions, config: pageConfig } =  getPageConfig(storage, this.options);
-
-              updateCssVariables(editor.view.dom, _currentOptions);
-
-              let headerHeight = "headerHeight" in this.storage ? this.storage.headerHeight : new Map();
-              let footerHeight = "footerHeight" in this.storage ? this.storage.footerHeight : new Map();
-
-              const widgetList = createDecoration({..._currentOptions, ...pageConfig}, headerHeight, footerHeight);
-
-
-              storage.appliedConfig = pageConfig;
-              storage.headerHeight = headerHeight;
-              storage.footerHeight = footerHeight;
-
-              return {
-                decorations : DecorationSet.create(newState.doc, [...widgetList]),
-                footerHeight
-              };
+            if (!meta && !configDirty) {
+              if (tr.docChanged) {
+                return {
+                  decorations: oldPluginState.decorations.map(tr.mapping, tr.doc),
+                  renderedPageCount: oldPluginState.renderedPageCount,
+                };
+              }
+              return oldPluginState;
             }
 
-            if (
-              (pageCount > 1 ? pageCount : 1) !== currentPageCount ||
-              isConfigDirty(storage)
-            ) {
-              return getNewDecoration();
-            }
+            // Rebuild the widget: either the convergence loop asked for a
+            // specific target count or config changed (so headers/footers/
+            // margins need to re-flow).
+            const { options: _currentOptions, config: pageConfig } =
+              getPageConfig(storage, this.options);
 
-            return oldDeco;
+            updateCssVariables(editor.view.dom, _currentOptions);
+
+            const headerHeight =
+              storage.headerHeight instanceof Map ? storage.headerHeight : new Map();
+            const footerHeight =
+              storage.footerHeight instanceof Map ? storage.footerHeight : new Map();
+
+            const nextPageCount =
+              meta && typeof meta.pageCount === "number"
+                ? meta.pageCount
+                : oldPluginState.renderedPageCount;
+
+            const widgetList = createDecoration(
+              { ..._currentOptions, ...pageConfig },
+              headerHeight,
+              footerHeight,
+              nextPageCount
+            );
+
+            storage.appliedConfig = pageConfig;
+            storage.headerHeight = headerHeight;
+            storage.footerHeight = footerHeight;
+
+            return {
+              decorations: DecorationSet.create(newState.doc, widgetList),
+              renderedPageCount: nextPageCount,
+            };
           },
-         
+
         },
 
         props: {
           decorations(state: EditorState) {
-            return this.getState(state)?.decorations as DecorationSet;
+            return (this.getState(state) as PaginationState | undefined)
+              ?.decorations;
           },
         },
         view: (editorView: EditorView) => {
@@ -483,26 +515,30 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
             return contentBottomInEditor > breakerBottomInEditor + 1;
           };
 
-          // Converge pagination inside a single animation frame.  Each
-          // dispatch re-runs Plugin.state.apply, which reads layout and
-          // rebuilds the widget when needed; we loop until the content no
-          // longer overflows past the last break.  Without this, the
-          // original one-rAF-per-iteration scheme made fast scrolls reveal
-          // unfinished layout (pages missing breaks at the bottom).
+          // Converge pagination inside a single animation frame. Each
+          // iteration measures layout once, then — only if the rendered
+          // count disagrees — dispatches a meta transaction carrying the
+          // new target. Apply no longer reads layout, so the inner loop is
+          // "measure → dispatch → re-measure" rather than "dispatch →
+          // dispatch → …", which keeps forced reflows to one per iteration.
           const iterateUntilStable = () => {
             if (destroyed) return;
             iterating = true;
             try {
-              // Always do one dispatch — kicks convergence even when the
-              // widget was first constructed before layout existed, so
-              // currentPageCount can correctly reflect the rendered DOM.
-              editorView.dispatch(
-                editorView.state.tr.setMeta(page_count_meta_key, {})
-              );
+              const { options: _currentOptions, config: pageConfig } =
+                getPageConfig(storage, this.options);
+              const opts = { ..._currentOptions, ...pageConfig };
+
               let i = 0;
-              for (; i < MAX_CONVERGE_ITER && isPaginationInsufficient(); i++) {
+              for (; i < MAX_CONVERGE_ITER; i++) {
+                const desired = getNewPageCount(editorView, opts);
+                const pluginState = paginationKey.getState(editorView.state);
+                const current = pluginState?.renderedPageCount ?? 1;
+                if (desired === current) break;
                 editorView.dispatch(
-                  editorView.state.tr.setMeta(page_count_meta_key, {})
+                  editorView.state.tr.setMeta(page_count_meta_key, {
+                    pageCount: desired,
+                  })
                 );
               }
               if (i === MAX_CONVERGE_ITER && isPaginationInsufficient()) {
@@ -515,17 +551,150 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
             } finally {
               iterating = false;
             }
-            if (rafHandle !== null) {
-              cancelAnimationFrame(rafHandle);
-              rafHandle = null;
+          };
+
+          // Header/footer measurement + CSS-var writes + refreshPage. The
+          // whole block reads and then writes layout (getBoundingClientRect
+          // + setProperty), so doing it on every transaction turns every
+          // keystroke into a forced reflow over the entire editor DOM —
+          // which at 100 pages is ~200 ms per keystroke. Running it from
+          // the rAF callback instead lets consecutive transactions coalesce
+          // into one measurement per frame.
+          const runPostConvergenceUpdate = () => {
+            if (destroyed) return;
+            const view = editorView;
+            const { options: _currentOptions } = getPageConfig(
+              storage,
+              this.options
+            );
+            const pluginState = paginationKey.getState(view.state);
+            const pageCount = pluginState?.renderedPageCount ?? 1;
+
+            const headerHeight = getHeaderHeight(
+              view.dom,
+              getCustomPages(_currentOptions.customHeader, {}),
+              "content"
+            );
+            const footerHeight = getFooterHeight(
+              view.dom,
+              getCustomPages({}, _currentOptions.customFooter),
+              "content"
+            );
+
+            const footerHeightForCurrentPages = new Map<PageNumber, number>();
+            for (let i = 0; i <= pageCount; i++) {
+              if (footerHeight.has(i)) {
+                footerHeightForCurrentPages.set(i, footerHeight.get(i) || 0);
+              }
             }
+
+            const headerHeightForCurrentPages = new Map<PageNumber, number>();
+            for (let i = 0; i <= pageCount; i++) {
+              if (headerHeight.has(i)) {
+                headerHeightForCurrentPages.set(i, headerHeight.get(i) || 0);
+              }
+            }
+
+            const pagesSetToCheck = new Set([
+              1,
+              ...footerHeightForCurrentPages.keys(),
+              ...headerHeightForCurrentPages.keys(),
+            ]);
+
+            let missingPageNumber: PageNumber | undefined = undefined;
+            for (let i = 1; i <= pageCount; i++) {
+              if (!pagesSetToCheck.has(i)) {
+                missingPageNumber = i;
+                break;
+              }
+            }
+
+            if (missingPageNumber) {
+              pagesSetToCheck.add(missingPageNumber);
+            }
+
+            pagesSetToCheck.delete(0);
+            const pageContentHeightVariable: Record<string, string> = {};
+            let maxContentHeight: number | undefined = undefined;
+            for (const page of pagesSetToCheck) {
+              const headerHeight = headerHeightForCurrentPages.has(page)
+                ? headerHeightForCurrentPages.get(page) || 0
+                : headerHeightForCurrentPages.get(0) || 0;
+              const footerHeight = footerHeightForCurrentPages.has(page)
+                ? footerHeightForCurrentPages.get(page) || 0
+                : footerHeightForCurrentPages.get(0) || 0;
+              const { _pageHeaderHeight, _pageHeight } = getHeight(
+                _currentOptions,
+                headerHeight,
+                footerHeight
+              );
+
+              const contentHeight =
+                page === 1 ? _pageHeight + _pageHeaderHeight : _pageHeight;
+              if (page === 1) {
+                pageContentHeightVariable[`rm-page-content-first`] =
+                  `${contentHeight}px`;
+              }
+              if (page === missingPageNumber) {
+                pageContentHeightVariable[`rm-page-content-general`] =
+                  `${contentHeight}px`;
+              } else {
+                pageContentHeightVariable[`rm-page-content-${page}`] =
+                  `${contentHeight}px`;
+              }
+              if (
+                maxContentHeight === undefined ||
+                contentHeight < maxContentHeight
+              ) {
+                maxContentHeight = contentHeight;
+              }
+            }
+
+            if (maxContentHeight) {
+              view.dom.style.setProperty(
+                `--rm-max-content-child-height`,
+                `${maxContentHeight - 10}px`
+              );
+            }
+            Object.entries(pageContentHeightVariable).forEach(
+              ([key, value]) => {
+                view.dom.style.setProperty(`--${key}`, value);
+              }
+            );
+            refreshPage(view.dom);
+          };
+
+          // Run convergence + post-update once the browser is ready to
+          // paint. Coalesces bursts of transactions (typing, paste, bulk
+          // edits) into a single measurement + rebuild pass.
+          // Outer let so the ResizeObserver and the rAF cycle share a single
+          // height baseline — we must resync AFTER each convergence cycle or
+          // the observer keeps firing on our own widget growth.
+          let lastSeenHeight =
+            typeof ResizeObserver !== "undefined"
+              ? editorView.dom.scrollHeight
+              : 0;
+
+          const scheduleConvergenceCycle = () => {
+            if (destroyed) return;
+            if (rafHandle !== null) return;
+            rafHandle = requestAnimationFrame(() => {
+              rafHandle = null;
+              iterateUntilStable();
+              runPostConvergenceUpdate();
+              converged = true;
+              // Resync AFTER iteration so later resize notifications are
+              // compared against the new steady state, not the pre-iteration
+              // baseline.
+              lastSeenHeight = editorView.dom.scrollHeight;
+            });
           };
 
           // ProseMirror only calls pluginView.update on state changes, and
           // TipTap's setup doesn't reliably dispatch one post-mount.
           // Without this kick, pagination would sit at pageCount = 1 until
           // the user clicks / types / focuses the editor.
-          const kickRafHandle = requestAnimationFrame(iterateUntilStable);
+          scheduleConvergenceCycle();
 
           // Re-converge when the editor's rendered size changes after
           // initial convergence. Fonts loading, images loading, CSS
@@ -534,31 +703,26 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
           // sees them.
           let resizeObserver: ResizeObserver | null = null;
           if (typeof ResizeObserver !== "undefined") {
-            let lastSeenHeight = editorView.dom.scrollHeight;
             resizeObserver = new ResizeObserver(() => {
               if (destroyed) return;
               // Skip callbacks caused by our own dispatches.
               if (iterating) return;
               const currentHeight = editorView.dom.scrollHeight;
               if (Math.abs(currentHeight - lastSeenHeight) < 2) return;
-              lastSeenHeight = currentHeight;
-              if (rafHandle !== null) cancelAnimationFrame(rafHandle);
-              rafHandle = requestAnimationFrame(() => {
-                rafHandle = null;
-                iterateUntilStable();
-                // Resync after iteration so later resizes are measured from
-                // the new steady state, not the pre-iteration size.
-                lastSeenHeight = editorView.dom.scrollHeight;
-              });
+              // Don't update lastSeenHeight here — the rAF callback resyncs
+              // after iteration finishes so we compare against the settled
+              // baseline.
+              converged = false;
+              scheduleConvergenceCycle();
             });
             resizeObserver.observe(editorView.dom);
           }
 
           return {
             update: (view: EditorView, prevState?: EditorState) => {
-              // Skip the heavy pass when nothing that affects pagination has
-              // changed. Gate on `converged` so the initial layout loop can
-              // actually converge after mount.
+              // Fast path: selection-only or meta-only transactions where
+              // pagination can't possibly need to change. This is the
+              // common case for cursor moves, focus, clicks, etc.
               const configDirty = isConfigDirty(storage);
               if (
                 converged &&
@@ -569,92 +733,16 @@ export const PaginationPlus = Extension.create<PaginationPlusOptions, Pagination
                 return;
               }
 
-              const { options: _currentOptions, config: pageConfig } = getPageConfig(storage, this.options);
-              const pageCount = getNewPageCount(view, {..._currentOptions, ...pageConfig});
-              const currentPageCount = getExistingPageCount(view);
-
-              const triggerUpdate = () => {
-                // Schedule one rAF; its callback iterates to steady state.
-                if (rafHandle !== null) cancelAnimationFrame(rafHandle);
-                rafHandle = requestAnimationFrame(() => {
-                  rafHandle = null;
-                  iterateUntilStable();
-                });
-              };
-
-              if (currentPageCount !== pageCount) {
-                converged = false;
-                triggerUpdate();
-                return;
-              }
-
-              const headerHeight = getHeaderHeight(view.dom, getCustomPages(_currentOptions.customHeader, {}), "content");
-              const footerHeight = getFooterHeight(view.dom, getCustomPages({}, _currentOptions.customFooter), "content");
-
-              const footerHeightForCurrentPages = new Map<PageNumber, number>();
-              for (let i = 0; i <= pageCount; i++) {
-                if (footerHeight.has(i)) {
-                  footerHeightForCurrentPages.set(i, footerHeight.get(i) || 0);
-                }
-              }
-
-              const headerHeightForCurrentPages = new Map<PageNumber, number>();
-              for (let i = 0; i <= pageCount; i++) {
-                if (headerHeight.has(i)) {
-                  headerHeightForCurrentPages.set(i, headerHeight.get(i) || 0);
-                }
-              }
-
-              const pagesSetToCheck = new Set([1, ...footerHeightForCurrentPages.keys(), ...headerHeightForCurrentPages.keys()]);
-
-              let missingPageNumber: PageNumber | undefined = undefined;
-              for (let i = 1; i <= pageCount; i++) {
-                if (!pagesSetToCheck.has(i)) {
-                  missingPageNumber = i;
-                  break;
-                }
-              }
-
-              if (missingPageNumber) {
-                pagesSetToCheck.add(missingPageNumber);
-              }
-
-              pagesSetToCheck.delete(0);
-              let pageContentHeightVariable: Record<string, string> = {};
-              let maxContentHeight: number | undefined = undefined;
-              for (const page of pagesSetToCheck) {
-                const headerHeight = headerHeightForCurrentPages.has(page) ? headerHeightForCurrentPages.get(page) || 0 : headerHeightForCurrentPages.get(0) || 0;
-                const footerHeight = footerHeightForCurrentPages.has(page) ? footerHeightForCurrentPages.get(page) || 0 : footerHeightForCurrentPages.get(0) || 0;
-                const { _pageHeaderHeight, _pageHeight } = getHeight(_currentOptions, headerHeight, footerHeight);
-
-                const contentHeight = page === 1 ? _pageHeight + _pageHeaderHeight : _pageHeight;
-                if (page === 1) {
-                  pageContentHeightVariable[`rm-page-content-first`] = `${contentHeight}px`;
-                }
-                if (page === missingPageNumber) {
-                  pageContentHeightVariable[`rm-page-content-general`] = `${contentHeight}px`;
-                } else {
-                  pageContentHeightVariable[`rm-page-content-${page}`] = `${contentHeight}px`;
-                }
-                if (maxContentHeight === undefined || contentHeight < maxContentHeight) {
-                  maxContentHeight = contentHeight;
-                }
-              }
-
-              if (maxContentHeight) {
-                view.dom.style.setProperty(`--rm-max-content-child-height`, `${maxContentHeight - 10}px`);
-              }
-              Object.entries(pageContentHeightVariable).forEach(([key, value]) => {
-                view.dom.style.setProperty(`--${key}`, value);
-              });
-              refreshPage(view.dom);
-
-              // Steady state — matches layout, CSS variables written.
-              converged = true;
+              // Anything else — doc change, config change, or still-
+              // converging layout — defers to the rAF cycle. Crucially we
+              // do NOT read DOM layout here: reading `scrollHeight` /
+              // `getBoundingClientRect` on every keystroke at 100 pages is
+              // ~200 ms of forced reflow.
+              converged = false;
+              if (!iterating) scheduleConvergenceCycle();
             },
             destroy: () => {
               destroyed = true;
-              cancelAnimationFrame(kickRafHandle);
               if (rafHandle !== null) cancelAnimationFrame(rafHandle);
               if (resizeObserver) resizeObserver.disconnect();
             },
@@ -827,7 +915,11 @@ const calculatePageCount = (
       const breakerBottomInEditor = lastPageBreakRect.bottom - editorRect.top;
       const contentBottomInEditor = editorDom.scrollHeight;
       const lastPageGap = contentBottomInEditor - breakerBottomInEditor;
-      if (lastPageGap > 0) {
+      // Tolerate sub-pixel drift — matches isPaginationInsufficient. Without
+      // this the convergence loop drifts upward by one page per cycle,
+      // because each widget rebuild introduces tiny rounding error that
+      // `> 0` reads as overflow.
+      if (lastPageGap > 1) {
         const addPage = Math.ceil(lastPageGap / pageContentAreaHeight);
         return currentPageCount + addPage;
       } else {
@@ -860,16 +952,17 @@ const getNewPageCount = (view: EditorView, pageOptions: PaginationPlusOptions) =
 function createDecoration(
   pageOptions: PaginationPlusOptions,
   headerHeightMap: HeaderHeightMap,
-  footerHeightMap: FooterHeightMap
+  footerHeightMap: FooterHeightMap,
+  pageCount: number
 ): Decoration[] {
 
   const commonHeaderOptions = { headerLeft: pageOptions.headerLeft, headerRight: pageOptions.headerRight };
   const commonFooterOptions = { footerLeft: pageOptions.footerLeft, footerRight: pageOptions.footerRight };
-      
+
 
   const pageWidget = Decoration.widget(
     0,
-    (view) => {
+    () => {
       const _pageGap = pageOptions.pageGap;
       const _pageBreakBackground = pageOptions.pageBreakBackground;
       
@@ -933,8 +1026,6 @@ function createDecoration(
       const _footerHeight = footerHeightMap.get(0) || 0;
 
       const fragment = document.createDocumentFragment();
-
-      const pageCount = getNewPageCount(view, pageOptions);
 
       for (let i = 0; i < pageCount; i++) {
         const pageNumber = i+1;
