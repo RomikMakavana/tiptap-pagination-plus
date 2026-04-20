@@ -2,3 +2,7 @@
 /dist
 /tiptap-*.tgz
 .DS_Store
+/.idea
+/perf/bundle.js
+/perf/bundle.js.map
+/perf/trace-*.json
