@@ -182,6 +182,9 @@ The PaginationPlus extension provides several commands to dynamically update pag
 | `updateContentMargins` | `margins: { top: number, bottom: number }` | Update content margins within pages |
 | `updateHeaderContent` | `left: string, right: string, pageNumber?: number` | Update header HTML content for left and right sides. If `pageNumber` is provided, updates header for that specific page only |
 | `updateFooterContent` | `left: string, right: string, pageNumber?: number` | Update footer HTML content for left and right sides. If `pageNumber` is provided, updates footer for that specific page only |
+| `togglePagination` | - | Toggle pagination on/off |
+| `enablePagination` | - | Explicitly enable pagination |
+| `disablePagination` | - | Explicitly disable pagination |
 
 #### Using Commands
 
@@ -212,6 +215,13 @@ editor.chain().focus().updateFooterContent('Confidential', 'Page {page} of {tota
 // Update header/footer for specific page
 editor.chain().focus().updateHeaderContent('Page 2 Title', 'Page {page}', 2).run()
 editor.chain().focus().updateFooterContent('Page 3 Footer', 'Page {page}', 3).run()
+
+// Toggle pagination state
+editor.chain().focus().togglePagination().run()
+
+// Or explicitly control pagination
+editor.chain().focus().enablePagination().run()
+editor.chain().focus().disablePagination().run()
 
 // Example with HTML content in headers/footers
 editor.chain().focus()
@@ -245,6 +255,7 @@ PAGE_SIZES.TABLOID // Tabloid size (1060x1635px)
 ### Features
 
 - Automatic page breaks based on content height
+- Runtime pagination toggle (`togglePagination`, `enablePagination`, `disablePagination`)
 - Page numbers in the footer
 - Custom header/footer HTML content support with multiline and rich text
 - **Per-page header/footer customization** - Define different headers and footers for specific pages
